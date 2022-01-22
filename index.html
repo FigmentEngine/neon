@@ -81,14 +81,12 @@
 					const index = ((y * width) + x) * 4;
 					const below = (((1+y) * width) + x) * 4;
 
-					if (!(
-							pixels[index + red] +
+					if (!(pixels[index + red] +
 							pixels[index + green] +
 							pixels[index + blue] > 480))
 						continue;
 
-					if ((
-							pixels[below + red] +
+					if ((	pixels[below + red] +
 							pixels[below + green] +
 							pixels[below + blue] > 480))
 						continue;
