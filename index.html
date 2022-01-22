@@ -59,41 +59,100 @@
 
 		videoElem.addEventListener('play', function(evt) {
 			console.log("play");
+			setup();
+		}, false);
+
+		function setup() {
+			console.log("setup");
 			const width = videoElem.videoWidth;
 			const height = videoElem.videoWidth;
 			canvas.width = width;
 			canvas.height = height;
 
 			context.drawImage(video, 0, 0);
-
 			stopCapture();
-			animate(width, height);
 
-		}, false);
+			const imageData = context.getImageData(0, 0, width, height);
+			const pixels = imageData.data;
+			const background_composite = getBackgroundRGB(pixels, width, height);
 
-		function render(frame, width, height) {
+			animate(background_composite, width, height);
+		}
+
+		function getBackgroundRGB(pixels, width, height) {
+			console.log("rgb");
+			let rgb_use = new Array(0x1000000).fill(0);
+
+			for (let y = 0; y < height; y++) {
+				for (let x = 0; x < width; x++) {
+					const index = ((y * width) + x) * 4;
+
+					const rgb = rgb_to_composite(
+						pixels[index + red],
+						pixels[index + green],
+						pixels[index + blue]);
+
+					rgb_use[rgb]++;
+				}
+			}
+
+			let max_index = 0;
+			for (let rgb = 0; rgb < rgb_use.length; rgb++) {
+				if (rgb_use[max_index] < rgb_use[rgb])
+					max_index = rgb;
+			}
+
+			console.log(
+				'rgb ' + max_index +
+				' as ' + composite_to_rgb(max_index) +
+				' used ' + rgb_use[max_index])
+			return max_index;
+		}
+
+		function rgb_to_composite(r, g, b) {
+			return ((r & 0x0ff) << 16) | ((g & 0x0ff ) << 8) | (b & 0x0ff);
+		}
+
+		function composite_to_rgb(composite) {
+			const r = (composite >> 16) & 0x0ff;
+			const g = (composite >> 8) & 0x0ff;
+			const b = (composite) & 0x0ff;
+
+			return [r, g, b];
+		}
+
+		function render(frame, background_composite, width, height) {
 			//console.log("render");
 			const imageData = context.getImageData(0, 0, width, height);
 			const pixels = imageData.data;
+			const background_rgb = composite_to_rgb(background_composite);
 
 			for (let y = height-2; y >= 0; y--) {
 				for (let x = 0; x < width; x++) {
 					const index = ((y * width) + x) * 4;
 					const below = (((1+y) * width) + x) * 4;
 
-					if (!(pixels[index + red] +
-							pixels[index + green] +
-							pixels[index + blue] > 480))
+					// what moves
+					if (!(pixels[index + red] != background_rgb[red] &&
+							pixels[index + green] != background_rgb[green] &&
+							pixels[index + blue] != background_rgb[blue]))
 						continue;
 
-					if ((	pixels[below + red] +
-							pixels[below + green] +
-							pixels[below + blue] > 480))
+
+					// what blocks
+					if ((pixels[below + red] != background_rgb[red] &&
+							pixels[below + green] != background_rgb[green] &&
+							pixels[below + blue] != background_rgb[blue]))
 						continue;
 
+					// swap whats below with pixel, this will cause
+					// corruption as the pixel below "floats" up due
+					// to multiple swaps.
+					// TODO: use a secondary background for swap (with moving px removed)
 					for (let part = 0; part < alpha; part++) {
 						temp = pixels[index + part];
 						pixels[index + part] = pixels[below + part];
+						//pixels[index + part] = background_rgb[part];
 						pixels[below + part] = temp;
 					}
 				}
@@ -106,11 +165,11 @@
 		}
 
 		var frames = 0;
-		function animate(width, height) {
-			render(frames++, width, height);
+		function animate(background_rgb, width, height) {
+			render(frames++, background_rgb, width, height);
 
 			// animation loop
-			window.requestAnimationFrame(() => animate(width, height));
+			window.requestAnimationFrame(() => animate(background_rgb, width, height));
 		}
 
 		async function startCapture() {
