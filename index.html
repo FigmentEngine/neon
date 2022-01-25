@@ -72,14 +72,106 @@
 			context.drawImage(video, 0, 0);
 			stopCapture();
 
-			const imageData = context.getImageData(0, 0, width, height);
-			const pixels = imageData.data;
-			const background_composite = getBackgroundRGB(pixels, width, height);
+			var contextImageData = context.getImageData(0, 0, width, height);
+			var pixels = contextImageData.data;
+			const background_composite = getBackgroundColor_composite(pixels, width, height);
 
-			animate(background_composite, width, height);
+			const freePixels = removeContrastingFreePixels(background_composite, pixels, width, height);
+			console.log("freePixels " + freePixels.length)
+			contextImageData.data = pixels;
+
+			animate(contextImageData, background_composite, pixels, width, height, freePixels);
 		}
 
-		function getBackgroundRGB(pixels, width, height) {
+		var frames = 0;
+		function animate(contextImageData, background_rgb, background_pixels, width, height, freePixels) {
+			render(frames++, contextImageData, background_pixels, background_rgb, width, height, freePixels);
+
+			// animation loop
+			window.requestAnimationFrame(() => animate(contextImageData, background_rgb, background_pixels, width, height, freePixels));
+		}
+
+		function render(frame, contextImageData, background_pixels, background_composite, width, height, freePixels) {
+			//console.log("render");
+			var pixels = background_pixels;
+			const background_rgb = composite_to_rgb(background_composite);
+
+			let updates = new Array();
+			for (let offset = 0; offset < freePixels.length; offset++) {
+				let freePixel = freePixels[offset];
+				const x = freePixel[0];
+				const y = freePixel[1];
+				const rgb = freePixel[2];
+				const index = ((y * width) + x) * 4;
+				const below = (((1+y) * width) + x) * 4;
+
+				const parts = composite_to_rgb(rgb);
+
+				// what can move
+				const belowIsMeAgain =
+							pixels[below + red] == parts[red] &&
+							pixels[below + green] == parts[green] &&
+							pixels[below + blue] == parts[blue];
+				const belowIsBackground =
+							pixels[below + red] == background_rgb[red] &&
+							pixels[below + green] == background_rgb[green] &&
+							pixels[below + blue] == background_rgb[blue];
+
+				if (!(belowIsMeAgain || belowIsBackground))
+					continue;
+
+				freePixel[1]++;
+
+				updates.push([below, parts]);
+			};
+
+			for (let offset = 0; offset < updates.length; offset++) {
+				const update = updates[offset];
+				const index = update[0];
+				const parts = update[1];
+
+				for (let part = 0; part < alpha; part++) {
+					pixels[index + part] = parts[part];
+				}
+			};
+
+			if (frames % 10 == 0) {
+				context.putImageData(contextImageData, 0, 0);
+				imageElem.src = canvas.toDataURL("image/png");
+			}
+		}
+
+		function removeContrastingFreePixels(background_composite, pixels, width, height) {
+			console.log("contrast");
+			const background_rgb = composite_to_rgb(background_composite);
+			let freePixels = new Array();
+
+			for (let y = height-2; y >= 0; y--) {
+				for (let x = 0; x < width; x++) {
+					const index = ((y * width) + x) * 4;
+
+					if ((pixels[index + red] +
+							pixels[index + green] +
+							pixels[index + blue] < 255*2))
+						continue;
+
+					const rgb = rgb_to_composite(
+						pixels[index + red],
+						pixels[index + green],
+						pixels[index + blue]);
+
+					freePixels.push([x, y, rgb]);
+
+					for (let part = 0; part < alpha; part++) {
+						pixels[index + part] = background_rgb[part];
+					}
+				}
+			}
+
+			return freePixels;
+		}
+
+		function getBackgroundColor_composite(pixels, width, height) {
 			console.log("rgb");
 			let rgb_use = new Array(0x1000000).fill(0);
 
@@ -119,57 +211,6 @@
 			const b = (composite) & 0x0ff;
 
 			return [r, g, b];
-		}
-
-		function render(frame, background_composite, width, height) {
-			//console.log("render");
-			const imageData = context.getImageData(0, 0, width, height);
-			const pixels = imageData.data;
-			const background_rgb = composite_to_rgb(background_composite);
-
-			for (let y = height-2; y >= 0; y--) {
-				for (let x = 0; x < width; x++) {
-					const index = ((y * width) + x) * 4;
-					const below = (((1+y) * width) + x) * 4;
-
-					// what moves
-					if (!(pixels[index + red] != background_rgb[red] &&
-							pixels[index + green] != background_rgb[green] &&
-							pixels[index + blue] != background_rgb[blue]))
-						continue;
-
-
-					// what blocks
-					if ((pixels[below + red] != background_rgb[red] &&
-							pixels[below + green] != background_rgb[green] &&
-							pixels[below + blue] != background_rgb[blue]))
-						continue;
-
-					// swap whats below with pixel, this will cause
-					// corruption as the pixel below "floats" up due
-					// to multiple swaps.
-					// TODO: use a secondary background for swap (with moving px removed)
-					for (let part = 0; part < alpha; part++) {
-						temp = pixels[index + part];
-						pixels[index + part] = pixels[below + part];
-						//pixels[index + part] = background_rgb[part];
-						pixels[below + part] = temp;
-					}
-				}
-			}
-
-			context.putImageData(imageData, 0, 0);
-			if (frames % 10 == 0) {
-				imageElem.src = canvas.toDataURL("image/png");
-			}
-		}
-
-		var frames = 0;
-		function animate(background_rgb, width, height) {
-			render(frames++, background_rgb, width, height);
-
-			// animation loop
-			window.requestAnimationFrame(() => animate(background_rgb, width, height));
 		}
 
 		async function startCapture() {
